@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/klauspost/compress/gzip"
 	"github.com/zeebo/blake3"
 )
 
@@ -40,6 +41,7 @@ const (
 	indexFileName   = "file_index.gob" // Binary format for the index
 	storageDir      = "storage"        // Directory for storing files by hash
 	hashErrorMargin = 0.1              // Error rate for hash comparison (10%)
+	batchSize       = 1024             // Batch size for reading and writing files
 )
 
 type FileEntry struct {
@@ -140,20 +142,33 @@ func copyFileToHashFile(filePath string, hash []byte) (string, error) {
 	}
 	defer newFile.Close()
 
-	// Copy the content from the original file to the new file
-	if _, err := io.Copy(newFile, originalFile); err != nil {
-		return "", fmt.Errorf("cannot copy file content: %w", err)
+	// Create a gzip writer
+	gw := gzip.NewWriter(newFile)
+	defer gw.Close()
+
+	// Read and write in batches
+	buffer := make([]byte, batchSize)
+	for {
+		n, err := originalFile.Read(buffer)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return "", fmt.Errorf("error reading file: %w", err)
+		}
+
+		_, err = gw.Write(buffer[:n])
+		if err != nil {
+			return "", fmt.Errorf("error writing compressed data: %w", err)
+		}
+	}
+
+	// Ensure all data is flushed
+	if err := gw.Close(); err != nil {
+		return "", fmt.Errorf("error closing gzip writer: %w", err)
 	}
 
 	return newFilePath, nil
-}
-
-func readFileContent(filePath string) ([]byte, error) {
-	content, err := os.ReadFile(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("cannot read file: %w", err)
-	}
-	return content, nil
 }
 
 func main() {
@@ -166,6 +181,7 @@ func main() {
 	}
 
 	command := os.Args[1]
+
 	fileIndex := NewFileIndex()
 
 	// Load the index if it exists
