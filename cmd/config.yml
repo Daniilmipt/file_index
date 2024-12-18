@@ -1,0 +1,4 @@
+general:
+  error_rate: 0.1
+  thread_count_index: 10
+  thread_count_search: 30
